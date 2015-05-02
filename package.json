@@ -1,0 +1,28 @@
+{
+  "name": "trai",
+  "version": "0.1.0",
+  "description": "Extracts email addresses from TRAI website",
+  "main": "trai.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rakeshtembhurne/trai.git"
+  },
+  "keywords": [
+    "email",
+    "trai"
+  ],
+  "author": "Rakesh Tembhurne",
+  "license": "BSD-2-Clause",
+  "bugs": {
+    "url": "https://github.com/rakeshtembhurne/trai/issues"
+  },
+  "dependencies": {
+    "cheerio": "~0.19.0",
+    "request": "~2.55.0",
+    "mysql": "~2.6.2",
+    "underscore": "~1.8.3"
+  }
+}
