@@ -1,7 +1,8 @@
 var cheerio = require("cheerio");
 var request = require("request");
-var mysql   = require('mysql');
-var _       = require('underscore');
+var mysql   = require("mysql");
+var async   = require("async");
+var colors  = require("colors");
 
 var connection = mysql.createConnection({
   host     : 'localhost',
@@ -12,8 +13,9 @@ var connection = mysql.createConnection({
 connection.connect();
 
 var traiUrls = [
+    // 'http://localhost/trai/example.html',
     'http://trai.gov.in/Comments/OLD/27-Mar=to-10-Apr/27-mar.html',
-    // 'http://trai.gov.in/Comments/11-APRIL/11-April.html',
+    'http://trai.gov.in/Comments/11-APRIL/11-April.html',
     'http://www.trai.gov.in/Comments/12-April/12-April-p2/12-April-p2.html',
     'http://www.trai.gov.in/Comments/13-April/html-13/13-April/p1/13-April.html',
     'http://www.trai.gov.in/Comments/14-April-1/14-April-1.html',
@@ -32,13 +34,14 @@ var traiUrls = [
     'http://trai.gov.in/comments/24-April/24-April.html'
 ];
 
-var getEmails = function(url) {
+async.eachSeries(traiUrls, function(url, callback) {
+    console.log("==========", url, "==========");
     request(url, function (error, response, body) {
         if (!error && response.statusCode == 200) {
             var $ = cheerio.load(body);
             $('tr').map(function(i, el) {
                 var nameEmail = $(this).children("td").first().next().text();
-                var match = nameEmail.match(/(.*)<(.*\(at\).*(\(dot\))?.*)>/);
+                var match = nameEmail.match(/(.*)<(.*\(at\).*(\(dot\))?.*)>?/);
                 if (match) {
                     var user = {
                         name: validName(match[1]),
@@ -54,14 +57,17 @@ var getEmails = function(url) {
                         };
                         saveToDatabase(user);
                     } else {
-                        console.log("Not saved: ", nameEmail);
+                        console.log("Will not be saved: ".red, nameEmail);
                     }
                 } 
-                console.log('---------');
             });
+            callback();
         }
     });
-};
+}, function(error) {
+    console.log("All urls are done, exiting now");
+    process.exit(0);
+});
 var validName = function(name) {
     name = name.replace(/[^a-zA-Z0-9\s\d]/g, '');
     return name.trim();
@@ -74,15 +80,9 @@ var validEmail = function(email) {
 };
 var saveToDatabase = function(user) {
     var sql = "INSERT INTO users SET name='"+user.name+"', email='"+user.email+"'";
-    console.log("saved", user);
     connection.query(sql, function(err, rows, fields) {
         if (err) throw err;
-        console.log("Successfully added", user);                                        
+        console.log("Successfully added".green, user);                                        
     });
 };
-_.each(traiUrls, function(url){
-    console.log("===========", url, "===========");
-    getEmails(url);
-});
-
 //http://trai.gov.in/Comments/Comments-List003.pdf
