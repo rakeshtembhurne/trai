@@ -3,6 +3,8 @@ var request = require("request");
 var mysql   = require("mysql");
 var async   = require("async");
 var colors  = require("colors");
+var fs      = require('fs');
+var http    = require('http');
 
 var connection = mysql.createConnection({
   host     : 'localhost',
@@ -34,40 +36,8 @@ var traiUrls = [
     'http://trai.gov.in/comments/24-April/24-April.html'
 ];
 
-async.eachSeries(traiUrls, function(url, callback) {
-    console.log("==========", url, "==========");
-    request(url, function (error, response, body) {
-        if (!error && response.statusCode == 200) {
-            var $ = cheerio.load(body);
-            $('tr').map(function(i, el) {
-                var nameEmail = $(this).children("td").first().next().text();
-                var match = nameEmail.match(/(.*)<(.*\(at\).*(\(dot\))?.*)>?/);
-                if (match) {
-                    var user = {
-                        name: validName(match[1]),
-                        email: validEmail(match[2])
-                    };                    
-                    saveToDatabase(user);
-                } else {
-                    var match = nameEmail.match(/(.*\(at\).*(\(dot\))?.*)/);
-                    if (match) {
-                        var user = {
-                            name: '',
-                            email: validEmail(match[1])
-                        };
-                        saveToDatabase(user);
-                    } else {
-                        console.log("Will not be saved: ".red, nameEmail);
-                    }
-                } 
-            });
-            callback();
-        }
-    });
-}, function(error) {
-    console.log("All urls are done, exiting now");
-    process.exit(0);
-});
+var rowCount = 1000;
+
 var validName = function(name) {
     name = name.replace(/[^a-zA-Z0-9\s\d]/g, '');
     return name.trim();
@@ -78,11 +48,75 @@ var validEmail = function(email) {
     email = email.replace('(dot)', '.');
     return email;
 };
-var saveToDatabase = function(user) {
-    var sql = "INSERT INTO users SET name='"+user.name+"', email='"+user.email+"'";
+var saveToDatabase = function(sql, rowCount, callback) {
     connection.query(sql, function(err, rows, fields) {
         if (err) throw err;
-        console.log("Successfully added".green, user);                                        
+        console.log("Successfully added".green, rowCount, " rows".green);
+        if (callback) callback();
     });
 };
+
+var download = function(url, dest, cb) {
+  var file = fs.createWriteStream(dest);
+  var request = http.get(url, function(response) {
+    response.pipe(file);
+    file.on('finish', function() {
+      file.close(cb);  // close() is async, call cb after close completes.
+    });
+  }).on('error', function(err) { // Handle errors
+    fs.unlink(dest); // Delete the file async. (But we don't check the result)
+    if (cb) cb(err.message);
+  });  
+};
+
+var processFiles = function() {
+    async.eachSeries(traiUrls, function(url, callback) {
+        var rowCount = 1000;
+        console.log("==========", url, "==========");
+        var filename = url.substring(url.lastIndexOf('/')+1);
+        // var $ = cheerio.load(body);
+        var $ = cheerio.load(fs.readFileSync(filename));
+
+        var sqlCount = 0;
+        var sqlQuery = "INSERT INTO `users` (`name`, `email`) VALUES ";
+        $('tr').map(function(i, el) {
+            if (sqlCount >= 1000) {
+                sqlQuery = sqlQuery.replace(/,\s*$/, "");
+                saveToDatabase(sqlQuery, rowCount);
+                sqlQuery = "INSERT INTO `users` (`name`, `email`) VALUES ";
+                sqlCount = 0;
+                rowCount += 1000;
+            };
+            sqlCount++;
+            var nameEmail = $(this).children("td").first().next().text();
+            var match     = nameEmail.match(/(.*)<(.*\(at\).*(\(dot\))?.*)>?/);
+            if (match) {
+                sqlQuery += " ('"+validName(match[1])+"', '"+validEmail(match[2])+"'), ";
+            } else {
+                var match = nameEmail.match(/(.*\(at\).*(\(dot\))?.*)/);
+                if (match) {
+                    sqlQuery += " ('', '"+validEmail(match[1])+"'), ";
+                } else {
+                    console.log("Will not be saved: ".red, nameEmail);
+                }
+            } 
+        });
+
+        sqlQuery = sqlQuery.replace(/,\s*$/, "");
+        saveToDatabase(sqlQuery, rowCount, callback);        
+        
+    }, function(error) {
+        console.log("All urls are done, exiting now");
+        process.exit(0);
+    });
+};
+
+async.eachSeries(traiUrls, function(url, callback) {
+    var filename = url.substring(url.lastIndexOf('/')+1);
+    console.log(filename);
+    download(url, filename, callback);
+}, function(error) {
+    processFiles();    
+});
+
 //http://trai.gov.in/Comments/Comments-List003.pdf
