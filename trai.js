@@ -5,6 +5,8 @@ var request = require("request");
 var mysql   = require("mysql");
 var colors  = require("colors");
 var async   = require("async");
+var fs      = require('fs');
+var http    = require('http');
 
 var connection = mysql.createConnection({
   host     : 'localhost',
@@ -57,39 +59,65 @@ var saveToDatabase = function(sql, user, cb) {
     });
 };
 
+var download = function(url, dest, cb) {
+    var file    = fs.createWriteStream(dest);
+    var request = http.get(url, function(response) {
+        response.pipe(file);
+        file.on('finish', function() {
+            console.log('Finished downloading '.yellow, url.yellow);
+            file.close(cb);
+        });
+    }).on('error', function(err) {
+        fs.unlink(dest);
+        if (cb) cb(err.message);
+    });  
+};
+
+var processFiles = function() {
+    async.eachSeries(traiUrls, function(url, callback) {
+        var filename = url.substring(url.lastIndexOf('/')+1);
+        var lr       = new LineByLineReader(filename);
+
+        lr.on('line', function (line) {
+            var $          = cheerio.load(line);
+            var nameEmail  = $("td").text().trim();
+            var didMatched = false;
+            var user = {name: '', email: ''};
+            var match = nameEmail.match(/(advqos)/);
+            if (!match) {
+                var match = nameEmail.match(/(.*)<(.*\(at\).*(\(dot\))?.*)>?/);
+                if (match) {
+                    user.name  = validName(match[1]);
+                    user.email = validEmail(match[2]);            
+                    didMatched = true;
+                } else {
+                    var match = nameEmail.match(/(.*\(at\).*(\(dot\))?.*)/);
+                    if (match) user.email = validEmail(match[1]);
+                }
+            }
+
+            if (didMatched) {
+                var sqlQuery = "INSERT INTO `users` (`name`, `email`) VALUES ";
+                sqlQuery += " ('"+user.name+"', '"+user.email+"')";            
+                saveToDatabase(sqlQuery, user, callback);
+            }
+        });
+
+        lr.on('error', function (err) {
+            console.log(err);
+            callback();
+        });
+        lr.on('end', function () {
+            console.log("file has ended");
+            callback();
+        });
+    });
+}
+
 async.eachSeries(traiUrls, function(url, callback) {
     var filename = url.substring(url.lastIndexOf('/')+1);
-    var lr       = new LineByLineReader(filename);
-
-    lr.on('line', function (line) {
-        var $          = cheerio.load(line);
-        var nameEmail  = $("td").text().trim();
-        var didMatched = false;
-        var user = {name: '', email: ''};
-        var match = nameEmail.match(/(advqos)/);
-        if (!match) {
-            var match = nameEmail.match(/(.*)<(.*\(at\).*(\(dot\))?.*)>?/);
-            if (match) {
-                user.name  = validName(match[1]);
-                user.email = validEmail(match[2]);            
-                didMatched = true;
-            } else {
-                var match = nameEmail.match(/(.*\(at\).*(\(dot\))?.*)/);
-                if (match) user.email = validEmail(match[1]);
-            }
-        }
-
-        if (didMatched) {
-            var sqlQuery = "INSERT INTO `users` (`name`, `email`) VALUES ";
-            sqlQuery += " ('"+user.name+"', '"+user.email+"')";            
-            saveToDatabase(sqlQuery, user, callback);
-        }
-    });
-
-    lr.on('error', function (err) {
-        console.log(err);
-    });
-    lr.on('end', function () {
-        console.log("file has ended");
-    });
+    console.log('Downloading '.yellow, filename.yellow);
+    download(url, filename, callback);
+}, function(error) {
+    processFiles();    
 });
